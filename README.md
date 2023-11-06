@@ -5,8 +5,8 @@
 - 본선 : 25개 팀중 7등으로 본선 진출.
 - 결선 : 10개 팀중 장려상 수상.
 
-<img src="./png/contest_main.png" width="500px" height="300px">
-<img src="./png/contest_tracks.png" width="500px" height="300px">
+<img src="./png/contest_main.png" width="1000px" height="444px">
+<img src="./png/contest_tracks.png" width="1000px" height="444px">
 
 
 # 1. 개요
