@@ -74,11 +74,17 @@ ref. https://kheafield.com/papers/avenue/kenlm.pdf
 2. Greedy : ouput결과에서 매시점 2000개의 음절 중 가장 높은 확률값으로 예측
 ```
 
-
+---
+---
 
 # 2. Using Pretrained Model
 ## 2.1 Main Architecture : Whisper
 <img src="./png/whisper.png" width="500px" height="377px">
 
-
+```
+- General-purpose speech recognition model로서, ASR뿐만 아니라 Multi-Languate Translation도 가능한 모델
+- 해당 모델은 Attention Is All You Need 논문과 비슷하게 Encoder Decoder 구조를 갖고 있으며
+BPE를 적용하여 따로 Decoding에 특별한 언어 모델이 없어도 준수한 성능을 갖고 있음.
+- 대회 제약 조건으로 2시간 혹은 1시간 내로 추론을 끝내야 하기 때문에 whisper/tiny를 선택하였음.
+```
 
