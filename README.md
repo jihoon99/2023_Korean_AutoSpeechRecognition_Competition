@@ -5,7 +5,7 @@
 
 # 1. Deep Learning From Scratch Only Using Contest Dataset
 ## 1.1 Main Architecture : Conformer
-<img src="./png/conformer.png" width="902px" height="1000px">
+<img src="./png/conformer.png" width="401px" height="500px">
 
 ```
 Number of Encoder Layer : 8
@@ -25,6 +25,9 @@ ref. https://arxiv.org/abs/2005.08100
 인풋과 아웃풋의 사이즈 길이가 다를 경우, NLLoss, CrossEntropy등을 활용할 수 있으나,
 음성인식, OCR, Image2Str 등에서 CTCLoss를 사용하여, 본 팀에서도 CTCLoss를 사용함.
 ```
+<img src="./png/ctcloss.png" width="500px" height="180px">
+
+
 
 ## 1.3 Optimizer : RMSprop
 ```
@@ -33,8 +36,14 @@ ref. https://arxiv.org/abs/2005.08100
 
 ref http://www.tbluche.com/ctc_and_blank.html
 ```
+## 1.4 Output dim
+```
+음성인식에서 최종 예측을 모음, 음소, 음절, BPE, 단어 단위로 예측을 진행하나
+본 대회에서 음절 단위로 예측을 진행하였고, 2000개의 음절을 예측하는 것으로 진행하였다.
 
-## 1.4 훈련 전략
+```
+
+## 1.5 훈련 전략
 ### First : 첫번째 훈련 과정 (WarmUp)
 ```
 앞에서 언급 하였듯 초기 수렴 이슈가 있었음.
@@ -55,9 +64,21 @@ Agumentation및 Noise등을 추가하지 않고 최대한 깔끔한 음질의 �
 3. 모델의 Attention Dropout, FFD Dropout : 0.1로 선언하여 훈련에 어려움을 추가함.
 ```
 
+### Thrid : LM Decoder (Post-Process)
+```
+1. N-gram : 5-gram 확률 기반 언어모델 개발
+(대회의 특성상 1시간 내로 Inference를 마무리 해야 하여, NN기반 언어모델을 만들기에 무리가 있었음.)
 
+ref. https://kheafield.com/papers/avenue/kenlm.pdf
+
+2. Greedy : ouput결과에서 매시점 2000개의 음절 중 가장 높은 확률값으로 예측
+```
 
 
 
 # 2. Using Pretrained Model
+## 2.1 Main Architecture : Whisper
+<img src="./png/whisper.png" width="500px" height="377px">
+
+
 
