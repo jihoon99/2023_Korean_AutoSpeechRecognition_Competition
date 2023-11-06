@@ -133,3 +133,50 @@ def preprocessing(transcripts_dest, labels_dest):
     generate_character_script(transcript_df, labels_dest)
 
     print('[INFO] Preprocessing is Done')
+
+
+def preprocess_1(
+        label_path, 
+        config,
+        token_label = os.path.join(os.getcwd(), 'labels.csv'),
+        ):
+    
+
+    def load_label(filepath = 'labels.csv'):
+        char2id = dict()
+        id2char = dict()
+
+        ch_labels = pd.read_csv(filepath, encoding="utf-8")
+
+        id_list = ch_labels["id"]
+        char_list = ch_labels["char"]
+        freq_list = ch_labels["freq"]
+
+        for (id_, char, freq) in zip(id_list, char_list, freq_list):
+            char2id[char] = id_
+            id2char[id_] = char
+        return char2id, id2char
+    
+    def sentence_to_target(sentence, char2id):
+        target = []
+
+        for ch in sentence:
+            try:
+                target += [char2id[ch]]
+            except KeyError:
+                continue
+
+        return target
+
+    df =  pd.read_csv(label_path)
+    char2id, id2char = load_label(token_label)
+    # char_id_transcript = sentence_to_target(df, char2id)
+
+    df['filename'] = config.dataset_path + '/' + df['filename']
+    df['sentence_to_char'] = df['text'].apply(lambda x: [1] + sentence_to_target(x, char2id) + [2]) # sos, eos token
+    df['len_text'] = df['sentence_to_char'].apply(lambda x: len(x))
+
+    if config.ignore_n_character:
+        df = df[df['len_text'] >= (config.n_character + 2)].reset_index(drop=True)
+
+    return df

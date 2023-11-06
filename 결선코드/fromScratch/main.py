@@ -8,24 +8,23 @@ import json
 import argparse
 from glob import glob
 
-from modules.preprocess import preprocessing
+from modules.preprocess import (
+    preprocessing, 
+    preprocess_1
+)
+
 from modules.trainer import (
     training,
     validating,
 )
+
 from modules.utils import (
     get_optimizer,
     get_criterion,
     get_lr_scheduler,
+    Optimizer
 )
-# from modules.audio import (
-#     FilterBankConfig,
-#     MelSpectrogramConfig,
-#     MfccConfig,
-#     SpectrogramConfig,
-# )
-# from modules.model import build_model
-from modules.model.deepspeech2 import build_deepspeech2
+
 from modules.model.conformer.model import Conformer
 
 from modules.vocab import KoreanSpeechVocabulary
@@ -43,7 +42,7 @@ from modules.data import (
     inferDataset,
 
 )
-from modules.utils import Optimizer
+
 from modules.metrics import get_metric
 from evaluate import load
 
@@ -52,7 +51,10 @@ from modules.inference import (
     single_infer,
     custom_oneToken_infer_for_testing,
     load_simple_decoder,
-    custom_oneToken_infer_for_testing_dataloader
+    custom_oneToken_infer_for_testing_dataloader,
+    inference,
+    inference_1,
+    decoderWithLM,
 )
 
 from torch.utils.data import (DataLoader, SequentialSampler, BatchSampler)
@@ -72,105 +74,9 @@ from nova import DATASET_PATH
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-def preprocess_1(
-        label_path, 
-        config,
-        token_label = os.path.join(os.getcwd(), 'labels.csv'),
-        ):
-    
-
-    def load_label(filepath = 'labels.csv'):
-        char2id = dict()
-        id2char = dict()
-
-        ch_labels = pd.read_csv(filepath, encoding="utf-8")
-
-        id_list = ch_labels["id"]
-        char_list = ch_labels["char"]
-        freq_list = ch_labels["freq"]
-
-        for (id_, char, freq) in zip(id_list, char_list, freq_list):
-            char2id[char] = id_
-            id2char[id_] = char
-        return char2id, id2char
-    
-    def sentence_to_target(sentence, char2id):
-        target = []
-
-        for ch in sentence:
-            try:
-                target += [char2id[ch]]
-            except KeyError:
-                continue
-
-        return target
-
-    df =  pd.read_csv(label_path)
-    char2id, id2char = load_label(token_label)
-    # char_id_transcript = sentence_to_target(df, char2id)
-
-    df['filename'] = config.dataset_path + '/' + df['filename']
-    df['sentence_to_char'] = df['text'].apply(lambda x: [1] + sentence_to_target(x, char2id) + [2]) # sos, eos token
-    df['len_text'] = df['sentence_to_char'].apply(lambda x: len(x))
-
-    if config.ignore_n_character:
-        df = df[df['len_text'] >= (config.n_character + 2)].reset_index(drop=True)
-
-    return df
-
 
 def save_checkpoint(checkpoint, dir):
     torch.save(checkpoint, os.path.join(dir))
-
-# def bind_model(model, parser):
-
-#     def save(dir_name, *parser):
-#         '''
-#             save trained model to nsml system
-#         '''
-
-#         os.makedirs(dir_name, exist_ok=True)
-#         save_dir = os.path.join(dir_name, 'model_checkpoint')
-#         save_checkpoint(model_states, save_dir)
-
-#         with open(os.path.join(dir_name, "dict_for_infer.pkl"), "wb") as f:
-#             pickle.dump(dict_for_infer, f)
-
-#         print(f"학습 모델 저장 완료!")
-
-
-#     def load(dir_name, *parser):
-#         '''
-#             load saved model from nsml system
-#         '''
-#         save_dir = os.path.join(dir_name, 'model_checkpoint')
-#         global checkpoint
-#         checkpoint = torch.load(save_dir)
-#         model.load_state_dict(checkpoint)
-#         global dict_for_infer
-#         with open(os.path.join(dir_name, "dict_for_infer.pkl"), 'rb') as f:
-#             dict_for_infer = pickle.load(f)
-#         print("    ***학습 모델 로딩 완료!")
-
-
-#     def infer(test_path, *parser):
-#         config = dict_for_infer['config']
-#         vocab = dict_for_infer['vocab']
-#         model.to('cuda')
-#         model.eval()
-
-#         results = []
-#         for i in glob(os.path.join(test_path, '*')): # glob이 도커에 안깔림...
-#             results.append(
-#                 {
-#                     'filename': i.split('/')[-1],
-#                     'text': custom_oneToken_infer_for_testing(model, i, vocab, config)[0]
-#                 }
-#             )
-#         return sorted(results, key=lambda x: x['filename'])
-
-
-#     nova.bind(save=save, load=load, infer=infer)  # 'nova.bind' function must be called at the end.
 
 def bind_model(model, config, optimizer=None):
     def save(path, *args, **kwargs):
@@ -212,253 +118,6 @@ def save_unit2id_json(open_fn, save_fn='unit2id.json', blank_as_pad = True):
     else:
         pass # read unit2id and save
 
-# NEW - @hijung - 2023.10.31
-def inference(path, model, config, **kwargs):
-    def after_decode(str_ls:str):
-        return str_ls.replace("<eos>", "")
-
-    #####################
-    # Build Model
-    #####################
-    device = 'cuda'
-    if next(model.parameters()).is_cuda == False:
-        model.to(device)
-    model.eval()
-    simple_decoder = Wav2Vec2CTCTokenizer(config.vocab_json_fn,
-                                        bos_token = '<sos>',
-                                        eos_token = '<eos>',    # labels.csv 불러와서 하는거기에...
-                                        pad_token = '<pad>',
-                                        word_delimiter_token = ' ')
-    #####################
-    # Build Dataloader
-    #####################
-    path_listdir = os.listdir(path)
-    path_listdir = [os.path.join(path, i) for i in path_listdir]
-
-    df_test = pd.DataFrame({'filename' : path_listdir, 
-                            'text' : ['']*len(path_listdir)})
-    test_dataset = CustomDataset_2(
-                        df_test,
-                        config=config,
-                        )
-    test_sampler = SequentialSampler(test_dataset)
-    test_loader = DataLoader(
-        test_dataset,
-        sampler=test_sampler,
-        batch_size=config.batch_size*3,
-        collate_fn=CustomPadFill_2(0,config),
-        num_workers=config.num_workers,
-        drop_last=False, # for inference
-        shuffle=False # for inference
-
-    )
-
-    #####################
-    # Start Inference
-    #####################
-    total_file_nm = []
-    total_y_hat = []
-    cnt = 0
-    begin_time = time.time()
-    # print(f"len dataLoader : {len(test_loader)}")
-    # print(f"batch_size : {config.batch_size*3}")
-
-    with torch.no_grad():
-        for inputs, input_lengths, file in test_loader: # input_lengths : audio seq length, target_length : token length
-            _start = time.time()
-
-            inputs = inputs.to(device)
-            outputs, output_lengths = model(inputs, input_lengths)
-            ######### 이부분 accumulate으로 변경
-
-            y_hats = torch.argmax(outputs.log_softmax(-1), dim=-1)
-
-            # @hijung - same as training decoding
-            _y_hats = [after_decode(simple_decoder.decode(y_)) for y_ in y_hats]
-            # _y_hats = [after_decode(
-            #                         simple_decoder.decode(y_,
-            #                         skip_special_tokens=True,
-            #                         )) for y_ in y_hats]
-            
-            total_y_hat += _y_hats
-            total_file_nm += file
-            cnt += 1
-            _end = time.time()
-            # print(f'{cnt} : {_end-_start:.4f} / for_loop_elasped : {_end-begin_time:.4f}')
-
-            torch.cuda.empty_cache()
-
-    results = [{'filename': i_file.replace("\\","/").split('/')[-1], 'text':i_y_hat} for i_file, i_y_hat in list(zip(total_file_nm, total_y_hat))]
-    return sorted(results, key=lambda x: x['filename'])
-
-
-
-
-
-
-def decoderWithLM(vocab_fn, lm_fn):
-    '''
-    vocab_fn : config.vocab_json_fn
-    lm_fn : 추가해야함.   5gram_correct.arpa
-    '''
-    def load_vocab_dict(fn):
-        '''
-            fn : unit2id.json
-        '''
-        with open(fn, 'r') as f:
-            vocab_dict =json.load(f)
-        return vocab_dict
-    def build_decoder(lm_fn, vocab_dict):
-        sorted_vocab_dict = {k: v for k, v in sorted(vocab_dict.items(), key=lambda item: item[1])}
-        decoder = build_ctcdecoder(
-            labels=list(sorted_vocab_dict.keys()),
-            kenlm_model_path=lm_fn,
-        )
-        return decoder
-    vocab_dict = load_vocab_dict(vocab_fn)
-    decoder = build_decoder(lm_fn, vocab_dict)
-    return decoder
-    
-
-def inference_1(path, model, config, **kwargs):
-    def after_decode(str_ls:str):
-        return str_ls.replace("<eos>", "")
-    
-    device = 'cuda'
-    if next(model.parameters()).is_cuda == False:
-        model.to(device)
-    model.eval()
-
-    decoder_with_lm = decoderWithLM(config.vocab_json_fn,
-                                    config.lm_fn)
-
-    #####################
-    # Build Dataloader
-    #####################
-    path_listdir = os.listdir(path)
-    path_listdir = [os.path.join(path, i) for i in path_listdir]
-
-    df_test = pd.DataFrame({'filename' : path_listdir, 
-                            'text' : ['']*len(path_listdir)})
-    test_dataset = CustomDataset_2(
-                        df_test,
-                        config=config,
-                        )
-    test_sampler = SequentialSampler(test_dataset)
-    test_loader = DataLoader(
-        test_dataset,
-        sampler=test_sampler,
-        batch_size=config.batch_size*3,
-        collate_fn=CustomPadFill_2(0,config),
-        num_workers=config.num_workers,
-        drop_last=False, # for inference
-        shuffle=False # for inference
-    )
-
-
-    #####################
-    # Start Inference
-    #####################
-    total_file_nm = []
-    total_y_hat = []
-    cnt = 0
-    begin_time = time.time()
-    # print(f"len dataLoader : {len(test_loader)}")
-    # print(f"batch_size : {config.batch_size*3}")
-
-    with torch.no_grad():
-        for inputs, input_lengths, file in test_loader: # input_lengths : audio seq length, target_length : token length
-            _start = time.time()
-
-            inputs = inputs.to(device)
-            outputs, output_lengths = model(inputs, input_lengths)
-            ######### 이부분 accumulate으로 변경
-
-            # y_hats = torch.argmax(outputs.log_softmax(-1), dim=-1)
-
-
-            # decode one by one
-            # @hijung - same as training decoding  #
-            # _y_hats = [after_decode(
-            #     decoder_with_lm.decode(y_.detach().cpu().numpy()).strip()
-            # ) for y_ in outputs.log_softmax(dim=-1)]
-
-
-            with multiprocessing.get_context('fork').Pool(16) as pool :
-                _y_hats = decoder_with_lm.decode_batch(pool, outputs.log_softmax(dim=-1).detach().cpu().numpy(), beam_width=80)
-
-            _y_hats = [after_decode(i.strip()) for i in _y_hats]
-
-
-
-            # _y_hats = [after_decode(
-            #                         simple_decoder.decode(y_,
-            #                         skip_special_tokens=True,
-            #                         )) for y_ in y_hats]
-
-            # [decoder.decode(i.detach().cpu().numpy()) for i in output.log_softmax(dim=-1)]
-
-
-            total_y_hat += _y_hats
-            total_file_nm += file
-            cnt += 1
-            _end = time.time()
-            print(f'{cnt} : {_end-_start:.4f} / for_loop_elasped : {_end-begin_time:.4f}')
-
-            torch.cuda.empty_cache()
-
-    results = [{'filename': i_file.replace("\\","/").split('/')[-1], 'text':i_y_hat} for i_file, i_y_hat in list(zip(total_file_nm, total_y_hat))]
-    return sorted(results, key=lambda x: x['filename'])
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-def customInference(path, model, config, **kwargs):
-    model.eval()
-    _ = ''
-
-    def make_datafrmae(path, config):
-        listdir = glob(os.path.join(path, '*'))
-        df = pd.DataFrame(listdir, columns = ['filename'])
-        return df
-    
-
-    df = make_datafrmae(path, config)
-    _inferDataset = inferDataset(df)
-    inferenceDataLoader = DataLoader(_inferDataset,
-                                     batch_sampler=16,
-                                     shuffle=False,
-                                     collate_fn=inferCustomPadFill(0,config),
-                                     num_workers=config.num_workers,
-                                     drop_last=False)
-
-    results = []
-    print(next(iter(inferenceDataLoader)))
-    for feature, filename, feature_len in inferenceDataLoader:
-        sentences = custom_oneToken_infer_for_testing_dataloader(model, feature, feature_len, config)
-        for _f, _s in zip(filename, sentences):
-            results += [
-                {
-                    'filename' : _f.split('/')[-1],
-                    'text' : _s.replace("<eos>", "")
-                }
-            ]
-
-    return sorted(results, key=lambda x: x['filename'])
-
-
-def spell_check(config):
-    pass
 
 def load_vocab(
         config,
@@ -532,28 +191,6 @@ def build_model(
 
 
 if __name__ == '__main__':
-    print('started')
-    # import subprocess
-    # subprocess.run("apt install cmake", shell=True)
-    # subprocess.run("pip install https://github.com/kpu/kenlm/archive/master.zip pyctcdecode", shell=True)
-    # subprocess.run("apt install build-essential cmake libboost-system-dev libboost-thread-dev libboost-program-options-dev libboost-test-dev libeigen3-dev zlib1g-dev libbz2-dev liblzma-dev", shell=True)
-    # subprocess.run("wget -O - https://kheafield.com/code/kenlm.tar.gz | tar xz", shell=True)
-    # # subprocess.run("wget --no-check-certificate --content-disposition https://github.com/kpu/kenlm", shell=True)
-    # subprocess.run("mkdir kenlm/build && cd kenlm/build && cmake .. && make -j2", shell=True)
-    # subprocess.run("ls kenlm/build/bin")
-
-    # subprocess.run("cd kenlm", shell=True)
-    # subprocess.run("mkdir build", shell=True)
-    # subprocess.run("cd build", shell=True)
-    # subprocess.run("cmake ..", shell=True)
-    # subprocess.run("make -j 4", shell=True)
-    # subprocess.run("make install", shell=True)
-    # subprocess.run("pip install https://github.com/kpu/kenlm/archive/master.zip",shell=True)
-    print(torch.__version__)
-
-    # import kenlm
-
-    # raise Exception("p")
 
     args = argparse.ArgumentParser()
 
@@ -764,16 +401,9 @@ if __name__ == '__main__':
             valid_size=.15
         ) # data 부분에서 무음 처리 하는 부분과 broadcasting 부분 바꿔야함.
         
-        # train_sampler = UniformLengthBatchingSampler(train_dataset, batch_size=config.batch_size)
-        # valid_sampler = UniformLengthBatchingSampler(valid_dataset, batch_size=config.batch_size)
         train_sampler = SequentialSampler(train_dataset)
-        # print("train_sampler", list(train_sampler)[:3])
-
-        # batch_sampler = BatchSampler(train_sampler, batch_size=config.batch_size, drop_last=True)
         batch_sampler = BucketBatchSampler(train_sampler, batch_size=config.batch_size, drop_last=True)
-        # DataLoader에서 제외 : batch_size, shuffle, sampler, and drop_last.
         print("-----BucketBatchSampler 100개", list(batch_sampler)[:100])
-        # raise Exception('여기까지 테스트!----------------------------------------')
 
 
         train_loader = DataLoader(
@@ -797,7 +427,6 @@ if __name__ == '__main__':
             # num_workers=0,
             drop_last=True
         )
-
 
 
 
@@ -830,15 +459,7 @@ if __name__ == '__main__':
 
 
 
-
-
         cer_metric = load("cer")
-
-
-
-
-
-
 
 
 
@@ -848,24 +469,24 @@ if __name__ == '__main__':
 
             # train 
             # @hijung - for quick test
-            # if config.version == 'train' or config.version == 'POC':
+            if config.version == 'train' or config.version == 'POC':
             # if config.version == 'train':
-            #     print("train goes on")
-            #     model, train_loss, train_cer = training(
-            #         config = config,
-            #         dataloader = train_loader,
-            #         optimizer = optimizer,
-            #         model = model,
-            #         criterion = criterion,
-            #         cer_metric= cer_metric,
-            #         wer_metric = 'wer_metric',
-            #         train_begin_time=train_begin_time,
-            #         device=device,
-            #         vocab=vocab,
-            #         decoder=simple_decoder
-            #     )
+                print("train goes on")
+                model, train_loss, train_cer = training(
+                    config = config,
+                    dataloader = train_loader,
+                    optimizer = optimizer,
+                    model = model,
+                    criterion = criterion,
+                    cer_metric= cer_metric,
+                    wer_metric = 'wer_metric',
+                    train_begin_time=train_begin_time,
+                    device=device,
+                    vocab=vocab,
+                    decoder=simple_decoder
+                )
 
-            #     print('[INFO] Epoch %d (Training) Loss %0.4f CER %0.4f' % (epoch, train_loss, train_cer))
+                print('[INFO] Epoch %d (Training) Loss %0.4f CER %0.4f' % (epoch, train_loss, train_cer))
 
             valid_begin_time = time.time()
 

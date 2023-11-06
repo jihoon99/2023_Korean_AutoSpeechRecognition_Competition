@@ -163,12 +163,7 @@ def training(model, dataloader, tokenizer, processor, criterion, cer_metric, tra
                 loss = outputs.loss
 
             forced_decoder_ids = processor.get_decoder_prompt_ids(language="Korean", task="transcribe")
-            # outputs = F.log_softmax(outputs, dim=-1)
 
-            # loss = criterion(
-            #     outputs.transpose(1,2).contiguous().view(-1, outputs.shape[-1]),
-            #     targets.contiguous().view(-1)
-            # )
             epoch_loss_total += loss.item()
 
             scaler.scale(loss).backward()
@@ -179,19 +174,6 @@ def training(model, dataloader, tokenizer, processor, criterion, cer_metric, tra
 
             y_hat = torch.argmax(logit, dim=-1)
 
-            # gen_y_hat = model.generate(inputs=inputs, forced_decoder_ids=forced_decoder_ids)     # [bs, seq]
-
-            ################################## for local only
-            # result += [
-            #     {
-            #         'answer' : _t,
-            #         'student' : _s,
-            #         'generate' : _g,
-            #         # 'cer' : cer_metric.compute(references=[_t], predictions=[_g])
-            #     } for _t, _s, _g in zip(tokenizer.batch_decode(targets,  skip_special_tokens=True),
-            #                             tokenizer.batch_decode(y_hat, skip_special_tokens=True),
-            #                             processor.batch_decode(gen_y_hat, skip_special_tokens=True))
-            # ]
 
 
             if cnt % config.print_every == 1:
@@ -212,8 +194,6 @@ def training(model, dataloader, tokenizer, processor, criterion, cer_metric, tra
                     y_hat = model.generate(inputs=inputs, forced_decoder_ids=forced_decoder_ids)     # [bs, seq]
                     y_hat = [processor.batch_decode(y_hat, skip_special_tokens=True)[0]]
 
-                # y_hat1 = model.generate(inputs=inputs)     # [bs, seq]
-                # y_hat1 = [processor.batch_decode(y_hat1, skip_special_tokens=True)[0]]
 
                 cer = cer_metric.compute(references=_targets, predictions=y_hat)
                 cer_ls += [cer]
@@ -227,21 +207,8 @@ def training(model, dataloader, tokenizer, processor, criterion, cer_metric, tra
                 print('generation : ',y_hat[0])
                 print('-'*100)
 
-                # logging.info(f'TRAINING epoch-{epoch}step : {cnt:4d}/{len(dataloader):4d}, loss : {loss:.6f}, cer : {cer:.2f}, wer : {wer:.2f}, elapsed : {elapsed:.2f}s {epoch_elapsed:.2f}m {train_elapsed:.2f}h')
-                # logging.info(f"TRAIN epoch-{epoch} {cnt} loss : {loss}")
-                # logging.info(f"TRAIN epoch-{epoch} {cnt} answer : {_targets[0]}")
-                # logging.info(f"TRAIN epoch-{epoch} {cnt} student : {_y_hats[0]}")
-                # logging.info(f"TRAIN epoch-{epoch} {cnt} generate : {y_hat[0]}")
-                
-                # print(log_format.format(
-                #     cnt, len(dataloader), loss,
-                #     cer, elapsed, epoch_elapsed, train_elapsed,
-                #     # optimizer.get_lr(),
-                # ))
             cnt += 1
             torch.cuda.empty_cache()
-    # result = pd.DataFrame(result)
-    # result.to_pickle(f"/data/asr/pre_trained/log/train_{epoch}.pkl")
     return model, epoch_loss_total/len(dataloader), np.mean(cer_ls)
 
 
@@ -258,7 +225,6 @@ def validating(model, dataloader, tokenizer, processor, criterion, cer_metric, t
 
     with torch.no_grad():
         for inputs, targets, input_lengths, target_lengths, audios, file, decoder_attn_mask in dataloader: # input_lengths : audio seq length, target_length : token length
-            # input_lengths : audio seq length, target_length : token length
             begin_time = time.time()
 
             inputs = inputs.to(device)
@@ -272,8 +238,6 @@ def validating(model, dataloader, tokenizer, processor, criterion, cer_metric, t
             if config.pretrained_version == 'wav2vec':
                 pass
             elif config.pretrained_version == 'whisper':
-                # options = dict(language='Korean', beam_size=5, best_of=5)
-                # transcribe_options = dict(task="transcribe", **options)
 
                 with autocast():
                     outputs = model(
@@ -291,21 +255,6 @@ def validating(model, dataloader, tokenizer, processor, criterion, cer_metric, t
 
 
             y_hat = torch.argmax(logit, dim=-1)
-
-            # gen_y_hat = model.generate(inputs=inputs, forced_decoder_ids=forced_decoder_ids)     # [bs, seq]
-
-            # result += [
-            #     {
-            #         'answer' : _t,
-            #         'student' : _s,
-            #         'generate' : _g,
-            #         # 'cer' : cer_metric.compute(references=[_t], predictions=[_g])
-            #     } for _t, _s, _g in zip(tokenizer.batch_decode(targets,  skip_special_tokens=True),
-            #                             tokenizer.batch_decode(y_hat, skip_special_tokens=True),
-            #                             processor.batch_decode(gen_y_hat, skip_special_tokens=True))
-            # ]
-
-
 
 
 
@@ -353,11 +302,6 @@ def validating(model, dataloader, tokenizer, processor, criterion, cer_metric, t
                 print('generation : ',y_hat[0])
                 print('-'*100)
 
-                # logging.info('VALIDATING epoch-{epoch} step : {cnt:4d}/{len(dataloader):4d},  cer : {cer:.2f}, wer : {wer:.2f}, elapsed : {elapsed:.2f}s {epoch_elapsed:.2f}m')
-                # logging.info(f"VALID epoch-{epoch} {cnt} loss : {loss}")
-                # logging.info(f"VALID epoch-{epoch} {cnt} answer : {_targets[0]}")
-                # logging.info(f"VALID epoch-{epoch} {cnt} student : {_y_hats[0]}")
-                # logging.info(f"VALID epoch-{epoch} {cnt} generate : {y_hat[0]}")
 
             cnt += 1
             torch.cuda.empty_cache()
@@ -800,24 +744,7 @@ if __name__ == '__main__':
     print(f"loading {config.pretrained_version}")
 
     if config.pretrained_version == 'whisper':
-        '''tokenizer : special token들을 부여한다. 
-        
-        input_str = "저는 서울중앙지검 지능범죄수사팀 최인호 검사입니다."
-        labels = tokenizer(input_str).input_ids
-        decoded_with_special = tokenizer.decode(labels, skip_special_tokens=False)
-        decoded_str = tokenizer.decode(labels, skip_special_tokens=True)
 
-        print(f"Input:                 {input_str}")
-        print(f"Decoded w/ special:    {decoded_with_special}")
-        print(f"Decoded w/out special: {decoded_str}")
-        print(f"Are equal:             {input_str == decoded_str}")
-        
-
-        Input:                 저는 서울중앙지검 지능범죄수사팀 최인호 검사입니다.
-        Decoded w/ special:    <|startoftranscript|><|ko|><|transcribe|><|notimestamps|>저는 서울중앙지검 지능범죄수사팀 최인호 검사입니다.<|endoftext|>
-        Decoded w/out special: 저는 서울중앙지검 지능범죄수사팀 최인호 검사입니다.
-        Are equal:             True
-        '''
         feature_extractor =  WhisperFeatureExtractor.from_pretrained(config.pretrained_model_name)  # log-Mel로 변환해주는 것. from audio
         tokenizer = WhisperTokenizer.from_pretrained(config.pretrained_model_name, language="Korean", task="transcribe") # finetuning ... transcribe for speech recognition  // https://github.com/huggingface/transformers/blob/v4.34.1/src/transformers/models/whisper/tokenization_whisper.py#L215
         processor = WhisperProcessor.from_pretrained(config.pretrained_model_name, language="Korean", task="transcribe") # tokenizer, feature_extractor
@@ -966,9 +893,6 @@ if __name__ == '__main__':
             print(_a)
 
 
-
-
-
         # lr 스케쥴 적용한 것과 아닌것.
         if config.use_lr_scheduler:
             lr_scheduler = get_lr_scheduler(config, optimizer, len(train_dataset)) # learning scheduler 적용했네.
@@ -990,17 +914,9 @@ if __name__ == '__main__':
 
         train_begin_time = time.time()
 
-
         ###################### let's check performance ################################
 
         print("#### zero shot ###########################")
-        if False:
-            for feature, target, feature_len, target_len, audil, file in train_dataLoader:
-                pass
-
-
-
-
 
         for epoch in range(config.num_epochs):
             print('[INFO] Epoch %d start' % epoch)
