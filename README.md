@@ -1,30 +1,63 @@
-# 2023_Korean_AutoSpeechRecognition_Contest
-
-# 0. 결과
-- 예선 : 100팀중 상위 25개팀에 선정.
-- 본선 : 25개 팀중 7등으로 본선 진출.
-- 결선 : 10개 팀중 장려상 수상.
-
-<img src="./png/contest_main.png" width="1000px" height="444px">
-<img src="./png/contest_tracks.png" width="1000px" height="444px">
-
-
-# 1. 개요
-## 트랙 2 - KB국민은행: 상담 음성인식 경진대회(금융 분야)
-### 1.1) 2023 한국어 AI 경진대회 Track 2-1. KB국민은행: 상담 음성인식 경진대회(금융 분야)
+# 결선 수상 방법론
 ```
-2023 한국어 AI 경진대회는 AI Hub 개방 한국어 음성 데이터를 사용하여 한국어 음성인식 인공지능 모델을 개발하는 대회입니다.
-한국어 음성 데이터를 이용하여 한국어 음성인식 인공지능 모델을 만들어보세요!
+대회의 전반적인 내용은 '개요'폴더에 작성
 ```
 
-### 1.2) 챌린지 내용
-- 금융분야 상담 음성 데이터를 활용한 음성인식 모델 개발
-- 참고 데이터 : 상담 음성 데이터 - https://www.aihub.or.kr/aihubdata/data/view.do?dataSetSn=100
+# 1. Deep Learning From Scratch Only Using Contest Dataset
+## 1.1 Main Architecture : Conformer
+<img src="./png/conformer.png" width="902px" height="1000px">
 
-### 1.3) 일정
-- 예선 : 2023년 9월 24일(일) ~ 2023년 9월 27일(수)
-- 본선 : 2023년 10월 10일(화) ~ 2023년 10월 23일(월)
-- 결선 : 2023년 10월 30일(월) ~ 2023년 11월 4일(토)
+```
+Number of Encoder Layer : 8
+Feed forward expansion factor : 2
+Feature dim : 512
 
-### 1.4) 참가대상
-- 대한민국 국민 누구나
+예선을 통해서 Encoder Layer가 8개 정도면 준수한 성능을 갖음을 확인 하였음.
+최근 Tranformer계열 모델들은 Expansion Factor를 4로 사용하나,
+시간과 자원이 한정된 대회에서 에자일 하게 움직이기 위해 2를 선택함.
+
+ref. https://arxiv.org/abs/2005.08100
+```
+
+## 1.2 Loss Function : CTCLoss
+
+```
+인풋과 아웃풋의 사이즈 길이가 다를 경우, NLLoss, CrossEntropy등을 활용할 수 있으나,
+음성인식, OCR, Image2Str 등에서 CTCLoss를 사용하여, 본 팀에서도 CTCLoss를 사용함.
+```
+
+## 1.3 Optimizer : RMSprop
+```
+대회 초기에 Optimizer로 RAdam, Adam을 사용하였으나, 비수렴하여
+논문들과 각종 레퍼런스를 참고하여 RMSprop + Learing Rate Scheduler 전략을 사용했을 경우 초기 수렴에 강점을 갖음을 발견
+
+ref http://www.tbluche.com/ctc_and_blank.html
+```
+
+## 1.4 훈련 전략
+### First : 첫번째 훈련 과정 (WarmUp)
+```
+앞에서 언급 하였듯 초기 수렴 이슈가 있었음.
+1. No Agumentation : 모델이 초기에 옳바른 방향으로 학습이 되게 하고자, Data Feeding에 있어서, 
+Agumentation및 Noise등을 추가하지 않고 최대한 깔끔한 음질의 데이터를 주입하려고 노력하였음.
+
+2. Not Necessary Padding : Batch Size의 최대 길이 값으로 패딩을 할 경우, 
+짧은 길이의 데이터 에게는 패딩이라는 쓸모 없는 데이터들이 주입이 됨.
+이를 해결하고자, 데이터를 길이 순으로 소팅하고 Batch Size로 나누어 모델에 주입함
+
+3. 모델에서 DropOut Ratio들을 모두 0으로 선정
+```
+
+### Second : 두번째 훈련 과정 (Main Training)
+```
+1. Data Agumentation : 생활소음, 가우시안 노이즈 등... 을 적용
+2. Random Batch Padding : Padding이라는 쓸모 없는 데이터를 추가하여, 현실과 훈련 상황을 동일하게 맞춰줌
+3. 모델의 Attention Dropout, FFD Dropout : 0.1로 선언하여 훈련에 어려움을 추가함.
+```
+
+
+
+
+
+# 2. Using Pretrained Model
+
